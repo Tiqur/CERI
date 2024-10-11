@@ -25,6 +25,8 @@
           # Install non-Nix packages using pip
           pip install --upgrade pip
           pip install opencv-python
+          pip install scipy
+          pip install rtree
 
           pip3 freeze > requirements.txt
         '';
