@@ -31,15 +31,20 @@ class CERI:
         return boxes
 
     # Attempt to identify is that of a character
-    def is_character(self, box, min_aspect_ratio=0.2, max_aspect_ratio=5.0, min_area=20, max_area=500):
+    def is_character(self, box, min_aspect_ratio=0.2, max_aspect_ratio=5.0, min_height_ratio=0.01, max_height_ratio=0.03):
+        img_height, img_width, img_channels = self.image.shape
         x, y, w, h = box
 
+        # Get box's height ratio compared to image height 
+        box_height_ratio = h/img_height
+        print(box_height_ratio)
+        
+        # Get aspect ratio and area
         aspect_ratio = w/h if h else 0
-        area = w*h
 
         return (
             min_aspect_ratio < aspect_ratio < max_aspect_ratio and
-            min_area < area < max_area
+            min_height_ratio < box_height_ratio < max_height_ratio
         )
 
     def merge_characters(self, boxes, horizontal_threshold, vertical_threshold):
@@ -67,16 +72,14 @@ class CERI:
                     current_string.append(other_box)
                     processed.add(j)
 
-            # Merge boxes into one string if there are multiple boxes
-            if len(current_string) > 1:
-                min_x = min(rect[0] for rect in current_string)
-                min_y = min(rect[1] for rect in current_string)
-                max_x = max(rect[0] + rect[2] for rect in current_string)
-                max_y = max(rect[1] + rect[3] for rect in current_string)
-                merged_box = (min_x, min_y, max_x - min_x, max_y - min_y)
+            min_x = min(rect[0] for rect in current_string)
+            min_y = min(rect[1] for rect in current_string)
+            max_x = max(rect[0] + rect[2] for rect in current_string)
+            max_y = max(rect[1] + rect[3] for rect in current_string)
+            merged_box = (min_x, min_y, max_x - min_x, max_y - min_y)
 
-                # Add the merged box to the result
-                strings.append(merged_box)
+            # Add the merged box to the result
+            strings.append(merged_box)
 
         return strings
 
