@@ -1,7 +1,7 @@
 import cv2
 import time
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import minimize_scalar
 import rtree
 
 class CERI:
@@ -9,25 +9,20 @@ class CERI:
     image_index = 0
 
     def __init__(self):
-        pass
+        self.image = None
+        self.precomputed_contours = None
+        self.precomputed_hierarchy = None
 
-    def optimize_thresholds(self, initial_thresholds, patience=5, min_improvement=0.01):
-        self.best_score = float('inf')
-        self.patience_counter = 0
-        self.patience = patience
-        self.min_improvement = min_improvement
-
-        # Get all contours
-        gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    def optimize_thresholds(self, initial_guess=0.02, bounds=(0.001, 0.1), max_iter=100):
+        grayscale = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+        thresh = cv2.adaptiveThreshold(grayscale, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
         self.precomputed_contours, self.precomputed_hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-        result = minimize(
+        result = minimize_scalar(
             self.threshold_loss_function,
-            initial_thresholds,
-            method='Nelder-Mead',
-            callback=self.optimization_callback,
-            options={'maxiter': 1000}
+            bounds=bounds,
+            method='bounded',
+            options={'maxiter': max_iter}
         )
         return result.x
 
@@ -46,23 +41,21 @@ class CERI:
 
         return False
 
-    def threshold_loss_function(self, thresholds):
-        min_height_ratio, max_height_ratio = thresholds
-        
+    def threshold_loss_function(self, threshold):
+        height, _, _ = self.image.shape
+        min_height = threshold * height
+        max_height = min_height * 4  # Assuming max_height is 4 times min_height
+
         character_boxes = [
             cv2.boundingRect(c) for c in self.precomputed_contours
-            if self.is_character(cv2.boundingRect(c), min_height_ratio, max_height_ratio)
+            if min_height <= cv2.boundingRect(c)[3] <= max_height
         ]
         
         character_boxes.sort(key=lambda box: box[1])
         lines = self.find_connected_lines(character_boxes)
         score = self.calculate_line_score(lines)
         
-        # Penalize very small thresholds
-        small_threshold_penalty = 1000 * (0.005 / min_height_ratio) if min_height_ratio < 0.005 else 0
-        
-        return -score + small_threshold_penalty
-
+        return -score
 
     def find_connected_lines(self, boxes, max_horizontal_gap=8, max_vertical_deviation=5):
         lines = []
@@ -98,13 +91,7 @@ class CERI:
         return abs(center1 - center2)
 
     def calculate_line_score(self, lines):
-        score = 0
-        for line in lines:
-            box_count = len(line)
-            height_consistency = 1 / (1 + np.std([box[3] for box in line]))
-            line_score = box_count * height_consistency
-            score += line_score
-        return score
+        return sum(len(line) * (1 / (1 + np.std([box[3] for box in line]))) for line in lines)
 
     def save_image(self, img, name=None):
         if name is None:
@@ -119,20 +106,13 @@ class CERI:
         if self.image is None:
             raise ValueError("Failed to load the image.")
         
-        height, width, channels = self.image.shape
+        start_time = time.time()
+        optimized_threshold = self.optimize_thresholds()
+        elapsed_time = time.time() - start_time
+        print(f"Optimization: {elapsed_time:.4f} seconds")
+        print(f"Optimized threshold: {optimized_threshold}")
 
-        initial_thresholds = [0.01, 0.03]
-        optimized_thresholds = self.optimize_thresholds(initial_thresholds)
-        optimized_thresholds = optimized_thresholds.flatten()
-        print(optimized_thresholds)
-
-        mint, maxt = optimized_thresholds
-        threshold_avg_height_px = abs(mint*height-mint*maxt)
-        horizontal_threshold = threshold_avg_height_px*0.8
-        vertical_threshold = threshold_avg_height_px*0.6
-        print(horizontal_threshold, vertical_threshold)
-
-        self.identify_text_elements(optimized_thresholds, horizontal_threshold, vertical_threshold)
+        self.identify_text_elements([optimized_threshold, optimized_threshold*4])
 
     def get_boxes_from_contours(self, contours):
         boxes = []
@@ -143,7 +123,7 @@ class CERI:
         return boxes
 
     # Attempt to identify is that of a character
-    def is_character(self, box, min_height_ratio=0.01, max_height_ratio=0.03):
+    def is_character(self, box, min_height_ratio, max_height_ratio):
         min_aspect_ratio = 0.2
         max_aspect_ratio = 5.0
         img_height, img_width, img_channels = self.image.shape
@@ -267,15 +247,15 @@ class CERI:
         print(f"Filter out non-characters: {elapsed_time:.4f} seconds")
 
         # Step 5: Filter to keep only innermost children (boxes without any children)
-        start_time = time.time()
-        filtered_boxes = self.filter_keep_innermost_children(character_boxes)
-        self.save_image_with_boxes(filtered_boxes)
-        elapsed_time = time.time() - start_time
-        print(f"Filter to keep only innermost children: {elapsed_time:.4f} seconds")
+        #start_time = time.time()
+        #filtered_boxes = self.filter_keep_innermost_children(character_boxes)
+        #self.save_image_with_boxes(filtered_boxes)
+        #elapsed_time = time.time() - start_time
+        #print(f"Filter to keep only innermost children: {elapsed_time:.4f} seconds")
 
         # Step 6: Merge characters into strings
         start_time = time.time()
-        strings = self.merge_characters(filtered_boxes, horizontal_threshold, vertical_threshold)
+        strings = self.merge_characters(character_boxes, horizontal_threshold, vertical_threshold)
         self.save_image_with_boxes(strings)
         elapsed_time = time.time() - start_time
         print(f"Merge characters into strings: {elapsed_time:.4f} seconds")
