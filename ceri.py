@@ -110,18 +110,19 @@ class CERI:
     def is_box_inside(self, box1, box2):
         x1, y1, w1, h1 = box1
         x2, y2, w2, h2 = box2
-        return x1 >= x2 and y1 >= y2 and x1 + w1 <= x2 + w2 and y1 + h1 <= y2 + h2
+        return x1 > x2 and y1 > y2 and x1 + w1 < x2 + w2 and y1 + h1 < y2 + h2
 
-    def filter_nested_boxes(self, boxes):
-        # Sort boxes by area in descending order
-        sorted_boxes = sorted(boxes, key=lambda b: b[2] * b[3], reverse=True)
-        filtered_boxes = []
-
-        for box in sorted_boxes:
-            if not any(self.is_box_inside(box, other_box) for other_box in filtered_boxes):
-                filtered_boxes.append(box)
-
-        return filtered_boxes
+    def filter_keep_innermost_children(self, boxes):
+        innermost_children = []
+        for i, box in enumerate(boxes):
+            has_children = False
+            for j, other_box in enumerate(boxes):
+                if i != j and self.is_box_inside(other_box, box):
+                    has_children = True
+                    break
+            if not has_children:
+                innermost_children.append(box)
+        return innermost_children
 
     # Return bounding boxes around words / sentences
     def identify_text_elements(self, horizontal_threshold=10, vertical_threshold=4, min_area=0):
@@ -141,14 +142,13 @@ class CERI:
         character_boxes = [c for c in boxed_contours if self.is_character(c)]
         self.save_image_with_boxes(character_boxes)
 
-        # Step 5: Filter out nested boxes
-        filtered_boxes = self.filter_nested_boxes(character_boxes)
+        # Step 5: Filter to keep only innermost children (boxes without any children)
+        filtered_boxes = self.filter_keep_innermost_children(character_boxes)
         self.save_image_with_boxes(filtered_boxes)
 
         # Step 6: Merge characters into strings
         strings = self.merge_characters(filtered_boxes, horizontal_threshold, vertical_threshold)
         self.save_image_with_boxes(strings)
-        
 
 
 
