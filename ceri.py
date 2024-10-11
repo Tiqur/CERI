@@ -1,4 +1,5 @@
 import cv2
+import numpy as np
 
 class CERI:
     # Debugging
@@ -112,17 +113,34 @@ class CERI:
         x2, y2, w2, h2 = box2
         return x1 > x2 and y1 > y2 and x1 + w1 < x2 + w2 and y1 + h1 < y2 + h2
 
-    def filter_keep_innermost_children(self, boxes):
-        innermost_children = []
+    def count_border_pixels(self, box, thresh):
+        x, y, w, h = box
+        # Create a mask for the border of the box
+        mask = np.zeros(self.image.shape[:2], dtype=np.uint8)
+        cv2.rectangle(mask, (x, y), (x+w, y+h), 255, 1)
+        
+        # Count non-zero pixels in the border
+        return cv2.countNonZero(cv2.bitwise_and(thresh, mask))
+
+    def filter_keep_character_contours(self, boxes, thresh):
+        filtered_boxes = []
         for i, box in enumerate(boxes):
-            has_children = False
+            keep_box = True
             for j, other_box in enumerate(boxes):
-                if i != j and self.is_box_inside(other_box, box):
-                    has_children = True
-                    break
-            if not has_children:
-                innermost_children.append(box)
-        return innermost_children
+                if i != j:
+                    if self.is_box_inside(box, other_box):
+                        # If this box is inside another box, compare border pixels
+                        if self.count_border_pixels(box, thresh) < self.count_border_pixels(other_box, thresh):
+                            keep_box = False
+                            break
+                    elif self.is_box_inside(other_box, box):
+                        # If this box contains another box, compare border pixels
+                        if self.count_border_pixels(other_box, thresh) > self.count_border_pixels(box, thresh):
+                            keep_box = False
+                            break
+            if keep_box:
+                filtered_boxes.append(box)
+        return filtered_boxes
 
     # Return bounding boxes around words / sentences
     def identify_text_elements(self, horizontal_threshold=10, vertical_threshold=4, min_area=0):
@@ -143,7 +161,7 @@ class CERI:
         self.save_image_with_boxes(character_boxes)
 
         # Step 5: Filter to keep only innermost children (boxes without any children)
-        filtered_boxes = self.filter_keep_innermost_children(character_boxes)
+        filtered_boxes = self.filter_keep_character_contours(character_boxes, thresh)
         self.save_image_with_boxes(filtered_boxes)
 
         # Step 6: Merge characters into strings
