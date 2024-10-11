@@ -155,6 +155,7 @@ class CERI:
         # Step 3: Find contours in the thresholded image
         contours, hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         boxed_contours = [b for b in self.get_boxes_from_contours(contours) if (b[2]*b[3]) > min_area] # Filter out boxes with area smaller than min_area
+        self.save_image_with_boxes(boxed_contours)
 
         # Step 4: Attempt to filter out non-characters 
         character_boxes = [c for c in boxed_contours if self.is_character(c)]
