@@ -20,10 +20,93 @@ class CERI:
         if self.image is None:
             raise ValueError("Failed to load the image.")
 
-        self.identify_text_elements(10, 4)
+        self.identify_text_elements()
+
+    def get_boxes_from_contours(self, contours):
+        boxes = []
+        for idx, contour in enumerate(contours):
+            x, y, w, h = cv2.boundingRect(contour)
+            boxes.append((x, y, w, h))
+            print(f"Contour {idx}: x={x}, y={y}, w={w}, h={h}")
+        return boxes
+
+    # Attempt to identify is that of a character
+    def is_character(self, box, min_aspect_ratio=0.2, max_aspect_ratio=5.0, min_area=20, max_area=500):
+        x, y, w, h = box
+
+        aspect_ratio = w/h if h else 0
+        area = w*h
+
+        return (
+            min_aspect_ratio < aspect_ratio < max_aspect_ratio and
+            min_area < area < max_area
+        )
+
+    def merge_characters(self, boxes, horizontal_threshold, vertical_threshold):
+        strings = []
+        processed = set()
+
+        # Sort boxes by x-coordinate for efficient grouping
+        boxes.sort(key=lambda b: b[0])
+
+        for i, box in enumerate(boxes):
+            if i in processed:
+                continue
+
+            # Start a new group for the group
+            current_string = [box]
+            processed.add(i)
+
+            # Check for other boxes to group them with the current string
+            for j, other_box in enumerate(boxes):
+                if j in processed:
+                    continue
+
+                # Horizontal merging
+                if self.character_within_threshold(current_string[-1], other_box, horizontal_threshold, vertical_threshold):
+                    current_string.append(other_box)
+                    processed.add(j)
+
+            # Merge boxes into one string if there are multiple boxes
+            if len(current_string) > 1:
+                min_x = min(rect[0] for rect in current_string)
+                min_y = min(rect[1] for rect in current_string)
+                max_x = max(rect[0] + rect[2] for rect in current_string)
+                max_y = max(rect[1] + rect[3] for rect in current_string)
+                merged_box = (min_x, min_y, max_x - min_x, max_y - min_y)
+
+                # Add the merged box to the result
+                strings.append(merged_box)
+
+        return strings
+
+    def character_within_threshold(self, box1, box2, horizontal_threshold, vertical_threshold):
+        x1, y1, w1, h1 = box1
+        x2, y2, w2, h2 = box2
+        
+        # Horizontal distance between the boxes
+        horizontal_distance = x2 - (x1 + w1)
+
+        top = abs((y1 + h1) - (y2 + h2))
+        bottom = abs(y1 - y2)
+        middle = abs((y1+h1//2) - (y2+h2//2))
+        
+        return horizontal_distance <= horizontal_threshold and (
+            top <= vertical_threshold or
+            bottom <= vertical_threshold or
+            middle <= vertical_threshold
+        )
+
+    def save_image_with_boxes(self, boxes):
+        result_image = self.image.copy()
+        for box in boxes:
+            x, y, w, h = box
+            cv2.rectangle(result_image, (x, y), (x + w, y + h), (0, 255, 0), 1)
+        self.save_image(result_image)
 
 
-    def identify_text_elements(self, horizontal_threshold, vertical_threshold):
+    # Return bounding boxes around words / sentences
+    def identify_text_elements(self, horizontal_threshold=10, vertical_threshold=4, min_area=0):
         # Step 1: Convert to grayscale
         grayscale = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
         self.save_image(grayscale)
@@ -34,5 +117,24 @@ class CERI:
 
         # Step 3: Find contours in the thresholded image
         contours, hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        boxed_contours = [b for b in self.get_boxes_from_contours(contours) if (b[2]*b[3]) > min_area] # Filter out boxes with area smaller than min_area
+
+        # Step 4: Attempt to filter out non-characters 
+        character_boxes = [c for c in boxed_contours if self.is_character(c)]
+        self.save_image_with_boxes(character_boxes)
+
+        # Step 5: Merge characters into strings
+        strings = self.merge_characters(character_boxes, horizontal_threshold, vertical_threshold)
+        self.save_image_with_boxes(strings)
+        
+
+
+
+
+
+
+
+
+
 
 
