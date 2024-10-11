@@ -1,4 +1,5 @@
 import cv2
+import time
 import numpy as np
 
 class CERI:
@@ -145,32 +146,47 @@ class CERI:
     # Return bounding boxes around words / sentences
     def identify_text_elements(self, horizontal_threshold=10, vertical_threshold=4, min_area=0):
         # Step 1: Convert to grayscale
+        start_time = time.time()
         grayscale = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
         self.save_image(grayscale)
+        elapsed_time = time.time() - start_time
+        print(f"Convert to grayscale: {elapsed_time:.4f} seconds")
 
         # Step 2: Apply adaptive thresholding
+        start_time = time.time()
         thresh = cv2.adaptiveThreshold(grayscale, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
         self.save_image(thresh)
+        elapsed_time = time.time() - start_time
+        print(f"Apply adaptive thresholding: {elapsed_time:.4f} seconds")
 
         # Step 3: Find contours in the thresholded image
+        start_time = time.time()
         contours, hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        boxed_contours = [b for b in self.get_boxes_from_contours(contours) if (b[2]*b[3]) > min_area] # Filter out boxes with area smaller than min_area
+        boxed_contours = [b for b in self.get_boxes_from_contours(contours) if (b[2] * b[3]) > min_area]
         self.save_image_with_boxes(boxed_contours)
+        elapsed_time = time.time() - start_time
+        print(f"Find contours in the thresholded image: {elapsed_time:.4f} seconds")
 
-        # Step 4: Attempt to filter out non-characters 
+        # Step 4: Attempt to filter out non-characters
+        start_time = time.time()
         character_boxes = [c for c in boxed_contours if self.is_character(c)]
         self.save_image_with_boxes(character_boxes)
+        elapsed_time = time.time() - start_time
+        print(f"Filter out non-characters: {elapsed_time:.4f} seconds")
 
         # Step 5: Filter to keep only innermost children (boxes without any children)
+        start_time = time.time()
         filtered_boxes = self.filter_keep_character_contours(character_boxes, thresh)
         self.save_image_with_boxes(filtered_boxes)
+        elapsed_time = time.time() - start_time
+        print(f"Filter to keep only innermost children: {elapsed_time:.4f} seconds")
 
         # Step 6: Merge characters into strings
+        start_time = time.time()
         strings = self.merge_characters(filtered_boxes, horizontal_threshold, vertical_threshold)
         self.save_image_with_boxes(strings)
-
-
-
+        elapsed_time = time.time() - start_time
+        print(f"Merge characters into strings: {elapsed_time:.4f} seconds")
 
 
 
