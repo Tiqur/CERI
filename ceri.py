@@ -179,6 +179,75 @@ class CERI:
     def filter_by_aspect_ratio(self, boxes, min_aspect_ratio, max_aspect_ratio):
         return [box for box in boxes if min_aspect_ratio < (box[2] / box[3] if box[3] else 0) < max_aspect_ratio]
 
+    def filter_clusters(self, strings):
+        adjusted_strings = []
+        processed = set()  # Keep track of processed indices
+
+        # Create a new R-tree specifically for the strings
+        rtree = index.Index()
+        for idx, string_box in enumerate(strings):
+            x, y, w, h = string_box
+            rtree.insert(idx, (x, y, x + w, y + h))
+
+        def get_cluster(string_box, rtree, strings, processed):
+            """ Recursively find all overlapping boxes and form a cluster. """
+            x1, y1, w1, h1 = string_box
+            x2, y2 = x1 + w1, y1 + h1  # Right and bottom coordinates of the string_box
+
+            # Find all intersecting boxes using the R-tree
+            overlapping_indices = list(rtree.intersection((x1, y1, x2, y2)))
+            cluster = [string_box]
+            processed.add(string_box)  # Mark this box as processed
+
+            for idx in overlapping_indices:
+                other_box = strings[idx]
+                if other_box in processed:  # Skip already processed boxes
+                    continue
+
+                # Recursively get more intersections
+                cluster.extend(get_cluster(other_box, rtree, strings, processed))
+
+            return cluster
+
+        for string_box in strings:
+            if string_box in processed:
+                continue
+
+            # Get the full cluster of intersecting boxes
+            cluster = get_cluster(string_box, rtree, strings, processed)
+
+            # Sort the cluster by width, largest to smallest
+            cluster = sorted(cluster, key=lambda box: box[2], reverse=True)
+
+            # Remove boxes one by one until no overlaps remain
+            while len(cluster) > 1:
+                has_overlap = False
+                for j, box in enumerate(cluster):
+                    x1, y1, w1, h1 = box
+                    x2, y2 = x1 + w1, y1 + h1
+
+                    # Check if any other box in the cluster overlaps with the current box
+                    for other_box in cluster[j + 1:]:
+                        ox1, oy1, ow, oh = other_box
+                        ox2, oy2 = ox1 + ow, oy1 + oh
+
+                        # If the boxes overlap, set has_overlap to True
+                        if not (x2 <= ox1 or ox2 <= x1 or y2 <= oy1 or oy2 <= y1):
+                            has_overlap = True
+                            break
+
+                    if has_overlap:
+                        # Remove the smallest box (last one in the sorted list)
+                        cluster.pop()
+                        break
+
+                if not has_overlap:
+                    break  # No overlaps remain
+
+            # Add the remaining boxes in the cluster to the adjusted_strings
+            adjusted_strings.extend(cluster)
+
+        return adjusted_strings
     # Return bounding boxes around words / sentences
     def identify_text_elements(self, horizontal_threshold=10, vertical_threshold=4, min_area=0):
         # Step 1: Convert to grayscale
@@ -217,13 +286,26 @@ class CERI:
         elapsed_time = time.time() - start_time
         print(f"Filtered out boxes with more than 1 child: {elapsed_time:.4f} seconds")
 
-
         # Step 6: Merge characters into strings
         start_time = time.time()
         strings = self.merge_characters(children_filtered_boxes, horizontal_threshold, vertical_threshold)
         self.save_image_with_boxes(strings)
         elapsed_time = time.time() - start_time
         print(f"Merge characters into strings: {elapsed_time:.4f} seconds")
+
+        # Step 7: Filter by aspect ratio (again)
+        start_time = time.time()
+        aspect_ratio_filtered_boxes_2 = self.filter_by_aspect_ratio(strings, min_aspect_ratio=1.2, max_aspect_ratio=10000000.0)
+        self.save_image_with_boxes(aspect_ratio_filtered_boxes_2)
+        elapsed_time = time.time() - start_time
+        print(f"Filter strings by aspect ratio: {elapsed_time:.4f} seconds")
+
+        # Step 8: Filter clusters
+        start_time = time.time()
+        adjusted_strings = self.filter_clusters(aspect_ratio_filtered_boxes_2)
+        self.save_image_with_boxes(adjusted_strings)
+        elapsed_time = time.time() - start_time
+        print(f"Filtered out clusters: {elapsed_time:.4f} seconds")
 
 
 
