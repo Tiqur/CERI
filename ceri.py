@@ -63,28 +63,45 @@ class CERI:
     def merge_characters(self, boxes, horizontal_threshold, vertical_threshold):
         strings = []
         processed = set()
+        height, width, channels = self.image.shape
 
         # Sort boxes by x-coordinate for efficient grouping
-        boxes.sort(key=lambda b: b[0])
+        sorted_boxes = sorted(boxes, key=lambda b: b[0])
 
-        for i, box in enumerate(boxes):
+        # Create an R-tree for efficient spatial querying
+        rtree = index.Index()
+        for idx, box in enumerate(sorted_boxes):
+            x, y, w, h = box
+            rtree.insert(idx, (x, y, x + w, y + h))
+
+        # Iterate through each box
+        for i, box in enumerate(sorted_boxes):
             if i in processed:
                 continue
 
-            # Start a new group for the group
+            # Start a new group with the current box
             current_string = [box]
             processed.add(i)
 
-            # Check for other boxes to group them with the current string
-            for j, other_box in enumerate(boxes):
+            # Get nearby boxes within the horizontal and vertical thresholds
+            x, y, w, h = box
+            nearby_box_ids = list(rtree.intersection((0, y-h//2-vertical_threshold, width, y+h//2+vertical_threshold)))
+
+            # Sort nearby boxes by x-coordinate
+            sorted_nearby_ids = sorted(nearby_box_ids, key=lambda b: sorted_boxes[b][0])
+
+            # Check each nearby box for merging
+            for j in sorted_nearby_ids:
+                other_box = sorted_boxes[j]
                 if j in processed:
                     continue
 
-                # Horizontal merging
+                # Merge if the boxes are connected
                 if self.is_box_connected(current_string[-1], other_box, horizontal_threshold, vertical_threshold):
                     current_string.append(other_box)
                     processed.add(j)
 
+            # Merge the boxes into a single bounding box
             min_x = min(rect[0] for rect in current_string)
             min_y = min(rect[1] for rect in current_string)
             max_x = max(rect[0] + rect[2] for rect in current_string)
@@ -95,6 +112,7 @@ class CERI:
             strings.append(merged_box)
 
         return strings
+
 
     def is_box_connected(self, box1, box2, max_horizontal_gap, max_vertical_deviation):
         x1, y1, w1, h1 = box1
