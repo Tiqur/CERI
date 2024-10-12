@@ -14,6 +14,13 @@
         ];
         
         shellHook = ''
+          export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath [
+            pkgs.stdenv.cc.cc
+            pkgs.zlib
+            pkgs.libGL
+            pkgs.glib
+          ]}
+
           # Create a virtual environment if not already created
           if [ ! -d ".venv" ]; then
             python3 -m venv .venv
@@ -24,8 +31,8 @@
 
           # Install non-Nix packages using pip
           pip install --upgrade pip
+          pip install numpy
           pip install opencv-python
-          pip install scipy
           pip install rtree
 
           pip3 freeze > requirements.txt
