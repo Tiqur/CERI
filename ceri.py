@@ -11,18 +11,16 @@ class CERI:
         self.precomputed_contours = None
         self.precomputed_hierarchy = None
         self.rtree = index.Index()
-        self.bounding_boxes = []
 
-    def build_rtree(self):
-        self.bounding_boxes = [cv2.boundingRect(c) for c in self.precomputed_contours]
-        for idx, box in enumerate(self.bounding_boxes):
+    def build_rtree(self, bounding_boxes):
+        for idx, box in enumerate(bounding_boxes):
             x, y, w, h = box
             self.rtree.insert(idx, (x, y, x + w, y + h))
 
-    def get_children(self, box):
+    def get_children(self, box, bounding_boxes):
         x, y, w, h = box
         overlapping = list(self.rtree.intersection((x, y, x + w, y + h)))
-        return [idx for idx in overlapping if self.is_box_inside(self.bounding_boxes[idx], box)]
+        return [idx for idx in overlapping if self.is_box_inside(bounding_boxes[idx], box)]
 
     def horizontal_distance(self, box1, box2):
         x1, _, w1, _ = box1
@@ -153,7 +151,7 @@ class CERI:
 
     def get_boxes_with_x_or_less_children(self, boxed_contours, max_child_count):
         # Create a dictionary to store the children of each box
-        box_children_dict = {box: self.get_children(box) for box in boxed_contours}
+        box_children_dict = {box: self.get_children(box, boxed_contours) for box in boxed_contours}
 
         # Sort the boxed_contours by the number of children each box has, in descending order
         sorted_tuple_list = sorted(box_children_dict.items(), key=lambda item: len(item[1]), reverse=True)
@@ -267,40 +265,48 @@ class CERI:
         # Step 3: Find contours in the thresholded image
         start_time = time.time()
         self.precomputed_contours, self.precomputed_hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        self.build_rtree()  # Build R-tree after finding contours
-        self.save_image_with_boxes(self.bounding_boxes)
+        bounding_boxes = [cv2.boundingRect(c) for c in self.precomputed_contours]
         elapsed_time = time.time() - start_time
-        print(f"Find contours and build R-tree: {elapsed_time:.4f} seconds")
+        print(f"Find contours: {elapsed_time:.4f} seconds")
 
         # Step 4: Filter by aspect ratio 
         start_time = time.time()
-        aspect_ratio_filtered_boxes = self.filter_by_aspect_ratio(self.bounding_boxes, min_aspect_ratio=0.2, max_aspect_ratio=3.0)
+        aspect_ratio_filtered_boxes = self.filter_by_aspect_ratio(bounding_boxes, min_aspect_ratio=0.2, max_aspect_ratio=3.0)
         self.save_image_with_boxes(aspect_ratio_filtered_boxes)
         elapsed_time = time.time() - start_time
         print(f"Filter out non-characters by aspect ratio: {elapsed_time:.4f} seconds")
 
-        # Step 5: Filter out boxes with more than 1 child
+        # Step 5: Build R-tree
+        start_time = time.time()
+        self.build_rtree(aspect_ratio_filtered_boxes)  # Build R-tree after finding contours
+        self.save_image_with_boxes(aspect_ratio_filtered_boxes)
+        elapsed_time = time.time() - start_time
+        print(f"Build R-tree: {elapsed_time:.4f} seconds")
+
+        # Step 6: Filter out boxes with more than 1 child
         start_time = time.time()
         children_filtered_boxes = self.get_boxes_with_x_or_less_children(aspect_ratio_filtered_boxes, 3)
         self.save_image_with_boxes(children_filtered_boxes)
         elapsed_time = time.time() - start_time
         print(f"Filtered out boxes with more than 1 child: {elapsed_time:.4f} seconds")
 
-        # Step 6: Merge characters into strings
+        # Step 7: Merge characters into strings
         start_time = time.time()
         strings = self.merge_characters(children_filtered_boxes, horizontal_threshold, vertical_threshold)
         self.save_image_with_boxes(strings)
         elapsed_time = time.time() - start_time
         print(f"Merge characters into strings: {elapsed_time:.4f} seconds")
 
-        # Step 7: Filter by aspect ratio (again)
+        # Step 8: Filter by aspect ratio (again)
         start_time = time.time()
         aspect_ratio_filtered_boxes_2 = self.filter_by_aspect_ratio(strings, min_aspect_ratio=1.2, max_aspect_ratio=10000000.0)
         self.save_image_with_boxes(aspect_ratio_filtered_boxes_2)
         elapsed_time = time.time() - start_time
         print(f"Filter strings by aspect ratio: {elapsed_time:.4f} seconds")
 
-        # Step 8: Filter clusters
+        # Step 9: Merge strings
+
+        # Step 10: Filter clusters
         start_time = time.time()
         adjusted_strings = self.filter_clusters(aspect_ratio_filtered_boxes_2)
         self.save_image_with_boxes(adjusted_strings)
