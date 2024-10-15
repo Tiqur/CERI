@@ -22,6 +22,56 @@ class CERI:
         overlapping = list(self.rtree.intersection((x, y, x + w, y + h)))
         return [idx for idx in overlapping if self.is_box_inside(bounding_boxes[idx], box)]
 
+    def _collect_rgb_values(self, pixels, surrounding_pixels):
+        """Helper function to collect RGB values and update counts."""
+        for rgb in pixels.reshape(-1, 3):
+            rgb_tuple = tuple(rgb)
+            if rgb_tuple in surrounding_pixels:
+                surrounding_pixels[rgb_tuple] += 1
+            else:
+                surrounding_pixels[rgb_tuple] = 1
+
+    def get_characters(self, boxes, color_leniency):
+        characters = []
+
+        for box in boxes:
+            x, y, w, h = box
+            
+            # Define margins (1 pixel in this case, you can adjust as needed)
+            margin = 1
+
+            # Dictionary to store RGB values and their counts
+            surrounding_pixels = {}
+
+            # Collect pixels from surrounding areas
+            if y - margin >= 0:  # Above the box
+                above_pixels = self.image[y - margin:y, x:x+w]
+                self._collect_rgb_values(above_pixels, surrounding_pixels)
+
+            if y + h + margin <= self.image.shape[0]:  # Below the box
+                below_pixels = self.image[y + h:y + h + margin, x:x+w]
+                self._collect_rgb_values(below_pixels, surrounding_pixels)
+
+            if x - margin >= 0:  # Left of the box
+                left_pixels = self.image[y:y+h, x - margin:x]
+                self._collect_rgb_values(left_pixels, surrounding_pixels)
+
+            if x + w + margin <= self.image.shape[1]:  # Right of the box
+                right_pixels = self.image[y:y+h, x + w:x + w + margin]
+                self._collect_rgb_values(right_pixels, surrounding_pixels)
+
+            # Calculate the most common color and its ratio
+            if surrounding_pixels:
+                # Find the most common color and its count
+                most_common_color, most_common_count = max(surrounding_pixels.items(), key=lambda item: item[1])
+                ratio = most_common_count / (2*(w+h))
+
+                # Check if the ratio meets the color leniency requirement
+                if ratio >= color_leniency:
+                    characters.append(box)
+
+        return characters
+
     def horizontal_distance(self, box1, box2):
         x1, _, w1, _ = box1
         x2, _, _, _ = box2
@@ -258,7 +308,8 @@ class CERI:
         # Step 2: Apply adaptive thresholding
         start_time = time.time()
         #blur = cv2.GaussianBlur(grayscale,(5,5), 0)
-        _ ,thresh = cv2.threshold(grayscale, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        #_ ,thresh = cv2.threshold(grayscale, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        thresh = cv2.adaptiveThreshold(grayscale, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
         self.save_image(thresh)
         elapsed_time = time.time() - start_time
         print(f"Apply adaptive thresholding: {elapsed_time:.4f} seconds")
@@ -267,53 +318,63 @@ class CERI:
         start_time = time.time()
         self.precomputed_contours, self.precomputed_hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         bounding_boxes = [cv2.boundingRect(c) for c in self.precomputed_contours]
+        self.save_image_with_boxes(bounding_boxes)
         print(len(bounding_boxes))
         elapsed_time = time.time() - start_time
         print(f"Find contours: {elapsed_time:.4f} seconds")
 
-        # Step 4: Filter by aspect ratio 
+        # Step 4: Filter out non-characters (surrounding pixels not same color)
         start_time = time.time()
-        aspect_ratio_filtered_boxes = self.filter_by_aspect_ratio(bounding_boxes, min_aspect_ratio=0.2, max_aspect_ratio=3.0)
-        self.save_image_with_boxes(aspect_ratio_filtered_boxes)
+        character_boxes = self.get_characters(bounding_boxes, color_leniency=0.8)
+        print(len(character_boxes))
+        self.save_image_with_boxes(character_boxes)
         elapsed_time = time.time() - start_time
-        print(f"Filter out non-characters by aspect ratio: {elapsed_time:.4f} seconds")
+        print(f"Filter out non-characters: {elapsed_time:.4f} seconds")
 
-        # Step 5: Build R-tree
+
+        ## Step 4: Filter by aspect ratio 
+        #start_time = time.time()
+        #aspect_ratio_filtered_boxes = self.filter_by_aspect_ratio(bounding_boxes, min_aspect_ratio=0.2, max_aspect_ratio=3.0)
+        #self.save_image_with_boxes(aspect_ratio_filtered_boxes)
+        #elapsed_time = time.time() - start_time
+        #print(f"Filter out non-characters by aspect ratio: {elapsed_time:.4f} seconds")
+
+        ## Step 5: Build R-tree
         start_time = time.time()
-        self.build_rtree(aspect_ratio_filtered_boxes)  # Build R-tree after finding contours
-        self.save_image_with_boxes(aspect_ratio_filtered_boxes)
+        self.build_rtree(character_boxes)  # Build R-tree after finding contours
+        self.save_image_with_boxes(character_boxes)
         elapsed_time = time.time() - start_time
         print(f"Build R-tree: {elapsed_time:.4f} seconds")
 
-        # Step 6: Filter out boxes with more than 1 child
-        start_time = time.time()
-        children_filtered_boxes = self.get_boxes_with_x_or_less_children(aspect_ratio_filtered_boxes, 3)
-        self.save_image_with_boxes(children_filtered_boxes)
-        elapsed_time = time.time() - start_time
-        print(f"Filtered out boxes with more than 1 child: {elapsed_time:.4f} seconds")
+        ## Step 6: Filter out boxes with more than 1 child
+        #start_time = time.time()
+        #children_filtered_boxes = self.get_boxes_with_x_or_less_children(aspect_ratio_filtered_boxes, 3)
+        #self.save_image_with_boxes(children_filtered_boxes)
+        #elapsed_time = time.time() - start_time
+        #print(f"Filtered out boxes with more than 1 child: {elapsed_time:.4f} seconds")
 
-        # Step 7: Merge characters into strings
+        ## Step 7: Merge characters into strings
         start_time = time.time()
-        strings = self.merge_characters(children_filtered_boxes, horizontal_threshold, vertical_threshold)
+        strings = self.merge_characters(character_boxes, horizontal_threshold, vertical_threshold)
         self.save_image_with_boxes(strings)
         elapsed_time = time.time() - start_time
         print(f"Merge characters into strings: {elapsed_time:.4f} seconds")
 
-        # Step 8: Filter by aspect ratio (again)
-        start_time = time.time()
-        aspect_ratio_filtered_boxes_2 = self.filter_by_aspect_ratio(strings, min_aspect_ratio=1.2, max_aspect_ratio=10000000.0)
-        self.save_image_with_boxes(aspect_ratio_filtered_boxes_2)
-        elapsed_time = time.time() - start_time
-        print(f"Filter strings by aspect ratio: {elapsed_time:.4f} seconds")
+        ## Step 8: Filter by aspect ratio (again)
+        #start_time = time.time()
+        #aspect_ratio_filtered_boxes_2 = self.filter_by_aspect_ratio(strings, min_aspect_ratio=1.2, max_aspect_ratio=10000000.0)
+        #self.save_image_with_boxes(aspect_ratio_filtered_boxes_2)
+        #elapsed_time = time.time() - start_time
+        #print(f"Filter strings by aspect ratio: {elapsed_time:.4f} seconds")
 
         # Step 9: Merge strings
 
-        # Step 10: Filter clusters
-        start_time = time.time()
-        adjusted_strings = self.filter_clusters(aspect_ratio_filtered_boxes_2)
-        self.save_image_with_boxes(adjusted_strings)
-        elapsed_time = time.time() - start_time
-        print(f"Filtered out clusters: {elapsed_time:.4f} seconds")
+        ## Step 10: Filter clusters
+        #start_time = time.time()
+        #adjusted_strings = self.filter_clusters(aspect_ratio_filtered_boxes_2)
+        #self.save_image_with_boxes(adjusted_strings)
+        #elapsed_time = time.time() - start_time
+        #print(f"Filtered out clusters: {elapsed_time:.4f} seconds")
 
 
 
