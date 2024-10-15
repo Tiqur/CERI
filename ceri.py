@@ -257,7 +257,8 @@ class CERI:
 
         # Step 2: Apply adaptive thresholding
         start_time = time.time()
-        thresh = cv2.adaptiveThreshold(grayscale, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+        #blur = cv2.GaussianBlur(grayscale,(5,5), 0)
+        _ ,thresh = cv2.threshold(grayscale, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         self.save_image(thresh)
         elapsed_time = time.time() - start_time
         print(f"Apply adaptive thresholding: {elapsed_time:.4f} seconds")
@@ -266,6 +267,7 @@ class CERI:
         start_time = time.time()
         self.precomputed_contours, self.precomputed_hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         bounding_boxes = [cv2.boundingRect(c) for c in self.precomputed_contours]
+        print(len(bounding_boxes))
         elapsed_time = time.time() - start_time
         print(f"Find contours: {elapsed_time:.4f} seconds")
 
