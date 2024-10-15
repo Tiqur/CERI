@@ -31,14 +31,11 @@ class CERI:
             else:
                 surrounding_pixels[rgb_tuple] = 1
 
-    def get_characters(self, boxes, color_leniency):
+    def get_characters(self, boxes, color_leniency, margin=1):
         characters = []
 
         for box in boxes:
             x, y, w, h = box
-            
-            # Define margins (1 pixel in this case, you can adjust as needed)
-            margin = 1
 
             # Dictionary to store RGB values and their counts
             surrounding_pixels = {}
@@ -307,8 +304,8 @@ class CERI:
 
         # Step 2: Apply adaptive thresholding
         start_time = time.time()
-        #blur = cv2.GaussianBlur(grayscale,(5,5), 0)
         #_ ,thresh = cv2.threshold(grayscale, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        #thresh = cv2.Canny(grayscale, 100, 200)
         thresh = cv2.adaptiveThreshold(grayscale, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
         self.save_image(thresh)
         elapsed_time = time.time() - start_time
@@ -325,7 +322,7 @@ class CERI:
 
         # Step 4: Filter out non-characters (surrounding pixels not same color)
         start_time = time.time()
-        character_boxes = self.get_characters(bounding_boxes, color_leniency=0.8)
+        character_boxes = self.get_characters(bounding_boxes, color_leniency=0.8, margin=1)
         print(len(character_boxes))
         self.save_image_with_boxes(character_boxes)
         elapsed_time = time.time() - start_time
