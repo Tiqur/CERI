@@ -10,17 +10,22 @@ class CERI:
         self.image = None
         self.precomputed_contours = None
         self.precomputed_hierarchy = None
-        self.rtree = index.Index()
+        self.rtree = None 
 
     def build_rtree(self, bounding_boxes):
+        self.rtree = index.Index()
         for idx, box in enumerate(bounding_boxes):
             x, y, w, h = box
             self.rtree.insert(idx, (x, y, x + w, y + h))
 
-    def get_children(self, box, bounding_boxes):
+    #def get_children(self, box, bounding_boxes):
+    #    x, y, w, h = box
+    #    overlapping = list(self.rtree.intersection((x, y, x + w, y + h)))
+    #    return [idx for idx in overlapping if self.is_box_inside(bounding_boxes[idx], box)]
+
+    def get_overlapping_ids(self, box, bounding_boxes):
         x, y, w, h = box
-        overlapping = list(self.rtree.intersection((x, y, x + w, y + h)))
-        return [idx for idx in overlapping if self.is_box_inside(bounding_boxes[idx], box)]
+        return list(self.rtree.intersection((x, y, x + w, y + h)))
 
     def _collect_rgb_values(self, pixels, surrounding_pixels):
         """Helper function to collect RGB values and update counts."""
@@ -196,104 +201,152 @@ class CERI:
                 innermost_children.append(box)
         return innermost_children
 
-    def get_boxes_with_x_or_less_children(self, boxed_contours, max_child_count):
-        # Create a dictionary to store the children of each box
-        box_children_dict = {box: self.get_children(box, boxed_contours) for box in boxed_contours}
+    def remove_overlapping_boxes(self, boxes, threshold):
+        # Sort boxes by area (high to low)
+        sorted_boxes = sorted(boxes, key=lambda box: box[2] * box[3], reverse=True)
+        filtered_boxes = []
 
-        # Sort the boxed_contours by the number of children each box has, in descending order
-        sorted_tuple_list = sorted(box_children_dict.items(), key=lambda item: len(item[1]), reverse=True)
-
-        valid_boxes = []
-        added_boxes = set()
-
-        for box, children in sorted_tuple_list:
-            # Check if the box already has too many children to be valid
-            if len(children) > max_child_count:
-                continue
+        def calculate_overlap(box1, box2):
+            x1, y1, w1, h1 = box1
+            x2, y2, w2, h2 = box2
             
-            # Check if the box is already in added_boxes
-            if box not in added_boxes:
-                valid_boxes.append(box)  # Add the box to valid_boxes
-                added_boxes.add(box)  # Mark the box as added
+            # Calculate the coordinates of the intersection rectangle
+            x_left = max(x1, x2)
+            y_top = max(y1, y2)
+            x_right = min(x1 + w1, x2 + w2)
+            y_bottom = min(y1 + h1, y2 + h2)
+            
+            if x_right < x_left or y_bottom < y_top:
+                return 0.0
+            
+            # Calculate the area of intersection
+            intersection_area = (x_right - x_left) * (y_bottom - y_top)
+            
+            # Calculate the area of the smaller box
+            smaller_box_area = min(w1 * h1, w2 * h2)
+            
+            # Calculate the overlap ratio
+            overlap_ratio = intersection_area / smaller_box_area
+            
+            return overlap_ratio
 
-                # Only update added_boxes with unique children to prevent duplicates
-                added_boxes.update(c for c in children if c not in added_boxes)
+        for box in sorted_boxes:
+            should_keep = True
+            for kept_box in filtered_boxes:
+                if calculate_overlap(box, kept_box) > threshold:  # Adjust this threshold as needed
+                    should_keep = False
+                    break
+            
+            if should_keep:
+                filtered_boxes.append(box)
 
-        return valid_boxes
+        return filtered_boxes
+
+    #def get_boxes_with_x_or_less_children(self, boxed_contours, max_child_count):
+    #    # Create a dictionary to store the children of each box
+    #    box_children_dict = {box: self.get_children(box, boxed_contours) for box in boxed_contours}
+
+    #    # Sort the boxed_contours by the number of children each box has, in descending order
+    #    sorted_tuple_list = sorted(box_children_dict.items(), key=lambda item: len(item[1]), reverse=True)
+
+    #    valid_boxes = []
+    #    added_boxes = set()
+
+    #    for box, children in sorted_tuple_list:
+    #        # Check if the box already has too many children to be valid
+    #        if len(children) > max_child_count:
+    #            continue
+    #        
+    #        # Check if the box is already in added_boxes
+    #        if box not in added_boxes:
+    #            valid_boxes.append(box)  # Add the box to valid_boxes
+    #            added_boxes.add(box)  # Mark the box as added
+
+    #            # Only update added_boxes with unique children to prevent duplicates
+    #            added_boxes.update(c for c in children if c not in added_boxes)
+
+    #    return valid_boxes
 
     def filter_by_aspect_ratio(self, boxes, min_aspect_ratio, max_aspect_ratio):
         return [box for box in boxes if min_aspect_ratio < (box[2] / box[3] if box[3] else 0) < max_aspect_ratio]
 
-    def filter_clusters(self, strings):
-        adjusted_strings = []
-        processed = set()  # Keep track of processed indices
+    #def filter_clusters(self, strings):
+    #    adjusted_strings = []
+    #    processed = set()  # Keep track of processed indices
 
-        # Create a new R-tree specifically for the strings
-        rtree = index.Index()
-        for idx, string_box in enumerate(strings):
-            x, y, w, h = string_box
-            rtree.insert(idx, (x, y, x + w, y + h))
+    #    # Create a new R-tree specifically for the strings
+    #    rtree = index.Index()
+    #    for idx, string_box in enumerate(strings):
+    #        x, y, w, h = string_box
+    #        rtree.insert(idx, (x, y, x + w, y + h))
 
-        def get_cluster(string_box, rtree, strings, processed):
-            """ Recursively find all overlapping boxes and form a cluster. """
-            x1, y1, w1, h1 = string_box
-            x2, y2 = x1 + w1, y1 + h1  # Right and bottom coordinates of the string_box
+    #    def get_cluster(string_box, rtree, strings, processed):
+    #        """ Recursively find all overlapping boxes and form a cluster. """
+    #        x1, y1, w1, h1 = string_box
+    #        x2, y2 = x1 + w1, y1 + h1  # Right and bottom coordinates of the string_box
 
-            # Find all intersecting boxes using the R-tree
-            overlapping_indices = list(rtree.intersection((x1, y1, x2, y2)))
-            cluster = [string_box]
-            processed.add(string_box)  # Mark this box as processed
+    #        # Find all intersecting boxes using the R-tree
+    #        overlapping_indices = list(rtree.intersection((x1, y1, x2, y2)))
+    #        cluster = [string_box]
+    #        processed.add(string_box)  # Mark this box as processed
 
-            for idx in overlapping_indices:
-                other_box = strings[idx]
-                if other_box in processed:  # Skip already processed boxes
-                    continue
+    #        for idx in overlapping_indices:
+    #            other_box = strings[idx]
+    #            if other_box in processed:  # Skip already processed boxes
+    #                continue
 
-                # Recursively get more intersections
-                cluster.extend(get_cluster(other_box, rtree, strings, processed))
+    #            # Recursively get more intersections
+    #            cluster.extend(get_cluster(other_box, rtree, strings, processed))
 
-            return cluster
+    #        return cluster
 
-        for string_box in strings:
-            if string_box in processed:
-                continue
+    #    for string_box in strings:
+    #        if string_box in processed:
+    #            continue
 
-            # Get the full cluster of intersecting boxes
-            cluster = get_cluster(string_box, rtree, strings, processed)
+    #        # Get the full cluster of intersecting boxes
+    #        cluster = get_cluster(string_box, rtree, strings, processed)
 
-            # Sort the cluster by width, largest to smallest
-            cluster = sorted(cluster, key=lambda box: box[2], reverse=True)
+    #        # Sort the cluster by width, largest to smallest
+    #        cluster = sorted(cluster, key=lambda box: box[2], reverse=True)
 
-            # Remove boxes one by one until no overlaps remain
-            while len(cluster) > 1:
-                has_overlap = False
-                for j, box in enumerate(cluster):
-                    x1, y1, w1, h1 = box
-                    x2, y2 = x1 + w1, y1 + h1
+    #        # Remove boxes one by one until no overlaps remain
+    #        while len(cluster) > 1:
+    #            has_overlap = False
+    #            for j, box in enumerate(cluster):
+    #                x1, y1, w1, h1 = box
+    #                x2, y2 = x1 + w1, y1 + h1
 
-                    # Check if any other box in the cluster overlaps with the current box
-                    for other_box in cluster[j + 1:]:
-                        ox1, oy1, ow, oh = other_box
-                        ox2, oy2 = ox1 + ow, oy1 + oh
+    #                # Check if any other box in the cluster overlaps with the current box
+    #                for other_box in cluster[j + 1:]:
+    #                    ox1, oy1, ow, oh = other_box
+    #                    ox2, oy2 = ox1 + ow, oy1 + oh
 
-                        # If the boxes overlap, set has_overlap to True
-                        if not (x2 <= ox1 or ox2 <= x1 or y2 <= oy1 or oy2 <= y1):
-                            has_overlap = True
-                            break
+    #                    # If the boxes overlap, set has_overlap to True
+    #                    if not (x2 <= ox1 or ox2 <= x1 or y2 <= oy1 or oy2 <= y1):
+    #                        has_overlap = True
+    #                        break
 
-                    if has_overlap:
-                        # Remove the smallest box (last one in the sorted list)
-                        cluster.pop()
-                        break
+    #                if has_overlap:
+    #                    # Remove the smallest box (last one in the sorted list)
+    #                    cluster.pop()
+    #                    break
 
-                if not has_overlap:
-                    break  # No overlaps remain
+    #            if not has_overlap:
+    #                break  # No overlaps remain
 
-            # Add the remaining boxes in the cluster to the adjusted_strings
-            adjusted_strings.extend(cluster)
+    #        # Add the remaining boxes in the cluster to the adjusted_strings
+    #        adjusted_strings.extend(cluster)
 
-        return adjusted_strings
+    #    return adjusted_strings
+
     # Return bounding boxes around words / sentences
+
+    def filter_by_area_ratio(self, boxes, max_area_ratio=0.2):
+        image_area = self.image.shape[0] * self.image.shape[1]
+        return [box for box in boxes if (box[2] * box[3]) / image_area <= max_area_ratio]
+
+
     def identify_text_elements(self, horizontal_threshold=10, vertical_threshold=4, min_area=0):
         # Step 1: Convert to grayscale
         start_time = time.time()
@@ -304,9 +357,9 @@ class CERI:
 
         # Step 2: Apply adaptive thresholding
         start_time = time.time()
-        #_ ,thresh = cv2.threshold(grayscale, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        _ ,thresh = cv2.threshold(grayscale, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         #thresh = cv2.Canny(grayscale, 100, 200)
-        thresh = cv2.adaptiveThreshold(grayscale, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+        #thresh = cv2.adaptiveThreshold(grayscale, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
         self.save_image(thresh)
         elapsed_time = time.time() - start_time
         print(f"Apply adaptive thresholding: {elapsed_time:.4f} seconds")
@@ -320,9 +373,17 @@ class CERI:
         elapsed_time = time.time() - start_time
         print(f"Find contours: {elapsed_time:.4f} seconds")
 
+        # Step 3.5: Filter out boxes with area ratio larger than the threshold
+        start_time = time.time()
+        area_filtered_boxes = self.filter_by_area_ratio(bounding_boxes)
+        self.save_image_with_boxes(area_filtered_boxes)
+        print(f"Boxes after area ratio filtering: {len(area_filtered_boxes)}")
+        elapsed_time = time.time() - start_time
+        print(f"Filter out large area boxes: {elapsed_time:.4f} seconds")
+
         # Step 4: Filter out non-characters (surrounding pixels not same color)
         start_time = time.time()
-        character_boxes = self.get_characters(bounding_boxes, color_leniency=0.8, margin=2)
+        character_boxes = self.get_characters(area_filtered_boxes, color_leniency=0.8, margin=2)
         print(len(character_boxes))
         self.save_image_with_boxes(character_boxes)
         elapsed_time = time.time() - start_time
@@ -356,6 +417,14 @@ class CERI:
         self.save_image_with_boxes(strings)
         elapsed_time = time.time() - start_time
         print(f"Merge characters into strings: {elapsed_time:.4f} seconds")
+
+        # Remove overlapping boxes
+        start_time = time.time()
+        self.build_rtree(strings)
+        non_overlapping = self.remove_overlapping_boxes(strings, 0.2)
+        self.save_image_with_boxes(non_overlapping)
+        elapsed_time = time.time() - start_time
+        print(f"Removing all overlapping boxes: {elapsed_time:.4f} seconds")
 
         ## Step 8: Filter by aspect ratio (again)
         #start_time = time.time()
