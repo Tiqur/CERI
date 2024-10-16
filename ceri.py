@@ -322,7 +322,7 @@ class CERI:
 
         # Step 4: Filter out non-characters (surrounding pixels not same color)
         start_time = time.time()
-        character_boxes = self.get_characters(bounding_boxes, color_leniency=0.8, margin=1)
+        character_boxes = self.get_characters(bounding_boxes, color_leniency=0.8, margin=2)
         print(len(character_boxes))
         self.save_image_with_boxes(character_boxes)
         elapsed_time = time.time() - start_time
